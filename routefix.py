@@ -22,7 +22,6 @@ if os.environ.get('SSHPASS') == None:
 
 
 qa = QAdmin()
-devnull = open('/dev/null', 'w+')
 
 def mn_peer_query(mothernode):
     result = requests.get(f'http://{mothernode}:8090/api/v1/peer-query')
@@ -38,14 +37,15 @@ def get_mn_peers(mothernode):
     return assets
 
 def ping(host, timeout=3):
-    proc = run(['ping', f'-W{timeout}', '-c1', host], stdout=devnull, stderr=devnull)
+    with open(os.devnull, 'w') as devnull:
+        proc = run(['ping', f'-W{timeout}', '-c1', host], stdout=devnull, stderr=devnull)
     if proc.returncode == 0:
         return True
     else:
         return False
 
 def exec_thru_mn(mothernode, local_ip, command):
-    with open('/dev/null', 'w+') as devnull:
+    with open(os.devnull, 'w') as devnull:
         proc = run(f"sshpass -e ssh -J specter@{mothernode} specter@{local_ip} \"{command}\"", shell=True, capture_output=True)
     result = proc.stdout.decode()
     return result
