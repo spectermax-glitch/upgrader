@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+#!venv/bin/python
+# This is to update the default route on a sensor that is unable to connect to tailscale.
+# it requires a secret password 
 import sys
 import requests
 import json
@@ -7,9 +9,17 @@ from qadmin import *
 from pathlib import Path
 import os
 from time import sleep
+from getpass import getpass
+
 
 SECRET_PATH = Path.home() / "secrets" / "ssh"
-os.environ['SSHPASS'] = open(SECRET_PATH).read().strip()
+if os.environ.get('SSHPASS') == None:
+    if SECRET_PATH.exists():
+        os.environ['SSHPASS'] = open(SECRET_PATH).read().strip()
+    else:
+        print("This utility requires the ssh password.")
+        os.environ['SSHPASS'] = getpass("Enter ssh password: ")
+
 
 qa = QAdmin()
 devnull = open('/dev/null', 'w+')
@@ -35,7 +45,8 @@ def ping(host, timeout=3):
         return False
 
 def exec_thru_mn(mothernode, local_ip, command):
-    proc = run(f"sshpass -e ssh -J specter@{mothernode} specter@{local_ip} \"{command}\"", shell=True, capture_output=True)
+    with open('/dev/null', 'w+') as devnull:
+        proc = run(f"sshpass -e ssh -J specter@{mothernode} specter@{local_ip} \"{command}\"", shell=True, capture_output=True)
     result = proc.stdout.decode()
     return result
 
@@ -74,7 +85,7 @@ def get_remote_local_interface(jumphost, host):
     print(ip_addresses)
     interfaces = []
     for interface in ip_addresses:
-        print(interface)
+#        print(interface)
         dev = interface['interface']
         ip = interface['address'].split('/')[0]
         if '192.168.13.' in ip:
@@ -82,40 +93,37 @@ def get_remote_local_interface(jumphost, host):
     if len(interfaces) > 1:
         print(interfaces)
         raise Exception(f'Multiple interfaces on 192.168.13.x!')
-        sys.exit()
     else:
         return interfaces[0]
 
-    
-
-if __name__=="__main__":
-    aid = int(sys.argv[1])
+def set_default_route(aid):
     sensor = f"sensor-node-{aid}"
     if ping(sensor):
         print("Host is responding")
         exit()
-    mothernode_ip = qa.mothernode_ip(aid)
+    mothernode_tailscale_ip = qa.mothernode_ip(aid)
     print('fetching peers')
-    peers = get_mn_peers(mothernode_ip)
+    peers = get_mn_peers(mothernode_tailscale_ip)
     if aid in peers:
         print('sensor may be reachable via mothernode')
-        local_ip = peers[aid]
+        sensor_local_ip = peers[aid]
         print('fetching default routes')
-        routes = get_default_routes(mothernode_ip, local_ip)
-        print(routes)
-        local_interface = get_remote_local_interface(mothernode_ip, local_ip)
-        local_device = local_interface['dev']
-        interface_ip = local_interface['ip']
-        if interface_ip != local_ip:
+        routes = get_default_routes(mothernode_tailscale_ip, sensor_local_ip)
+#        print(routes)
+        print('gathering remote interfaces')
+        local_interface = get_remote_local_interface(mothernode_tailscale_ip, sensor_local_ip)
+        sensor_local_device = local_interface['dev']
+        sensor_interface_ip = local_interface['ip']
+        if sensor_interface_ip != sensor_local_ip:
             raise Exception(f"IP Mismatch {local_ip}<->{interface_ip}")
 #        print(f"remote interface: {local_device} {interface_ip}")
-        gateway_ip = get_local_ip(mothernode_ip)
-        command = f'sudo ip route add default via {gateway_ip} dev {local_device} metric 10'
+        mothernode_local_ip = get_local_ip(mothernode_tailscale_ip)
+        command = f'sudo ip route add default via {mothernode_local_ip} dev {sensor_local_device} metric 10'
         print('\n' + command)
         yorn = input('Execute command? ')
         if yorn.strip() in ['y', 'Y', 'yes', 'Yes', 'yeah', 'ok']:
             print('setting default route')
-            result = exec_thru_mn(mothernode_ip, local_ip, command)            
+            result = exec_thru_mn(mothernode_tailscale_ip, sensor_local_ip, command)            
             print(result)
         else:
             print('quitting')
@@ -131,3 +139,14 @@ if __name__=="__main__":
             else:
                 print('Still no ping...')
                 c += 1
+        print('It could take a few minutes for the device to reconnect to tailscale.')
+
+
+if __name__ == "__main__":
+    asset_input = sys.argv[1]
+    if asset_input.startswith('sensor-node-'):
+        aid = int(re.findall(r'^.*?-([0-9]{4})$', asset_input))
+    else:
+        aid = int(asset_input)
+    set_default_route(aid) 
+
