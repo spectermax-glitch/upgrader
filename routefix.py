@@ -10,7 +10,7 @@ from pathlib import Path
 import os
 from time import sleep
 from getpass import getpass
-
+import re
 
 SECRET_PATH = Path.home() / "secrets" / "ssh"
 if os.environ.get('SSHPASS') == None:
@@ -102,6 +102,9 @@ def set_default_route(aid):
         print("Host is responding")
         exit()
     mothernode_tailscale_ip = qa.mothernode_ip(aid)
+    if not ping(mothernode_tailscale_ip):
+        print('could not ping mothernode')
+        exit()
     print('fetching peers')
     peers = get_mn_peers(mothernode_tailscale_ip)
     if aid in peers:
@@ -131,7 +134,7 @@ def set_default_route(aid):
         print('default route set')
         print('pausing for route to take effect')
         c = 0
-        while c < 3:
+        while c < 4:
             sleep(3)
             if ping(f"sensor-node-{aid}"):
                 print('Host is responding to ping!')
@@ -139,13 +142,14 @@ def set_default_route(aid):
             else:
                 print('Still no ping...')
                 c += 1
+            sleep(3)
         print('It could take a few minutes for the device to reconnect to tailscale.')
 
 
 if __name__ == "__main__":
     asset_input = sys.argv[1]
     if asset_input.startswith('sensor-node-'):
-        aid = int(re.findall(r'^.*?-([0-9]{4})$', asset_input))
+        aid = int(re.findall(r'^.*?-([0-9]{4})$', asset_input)[0])
     else:
         aid = int(asset_input)
     set_default_route(aid) 
